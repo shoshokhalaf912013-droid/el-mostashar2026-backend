@@ -9,6 +9,7 @@
     "seed": "knex seed:run"
   },
   "dependencies": {
+    "@napi-rs/canvas": "^1.0.9",
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.6",
     "dotenv": "^16.6.1",
