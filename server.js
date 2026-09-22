@@ -156,26 +156,70 @@ if (!process.env.MONGO_URL) {
   process.exit(1);
 }
 
-mongoose
-  .connect(
-    process.env.MONGO_URL
-  )
-  .then(() => {
+// Vercel / serverless-safe connection manager.
+// The first request may arrive before the initial connection
+// has finished, so all callers share and await the same Promise.
+let mongoConnectionPromise = null;
 
-    console.log(
-      "🍃 MongoDB Connected"
-    );
+const connectMongo = async () => {
 
-  })
-  .catch((error) => {
+  if (
+    mongoose.connection.readyState === 1
+  ) {
 
-    console.error(
-      "❌ MongoDB Connection Error:",
-      error.message
-    );
+    return mongoose.connection;
+  }
 
-    process.exit(1);
-  });
+  if (!mongoConnectionPromise) {
+
+    mongoConnectionPromise =
+      mongoose
+        .connect(
+          process.env.MONGO_URL,
+          {
+            // Atlas/Vercel connectivity can prefer IPv6 on
+            // modern Node runtimes; force IPv4 for consistency.
+            family: 4,
+
+            // Fail fast enough for a serverless request while
+            // still allowing normal Atlas startup latency.
+            serverSelectionTimeoutMS: 10000,
+            connectTimeoutMS: 10000,
+
+            // Avoid keeping idle connections around forever.
+            maxIdleTimeMS: 60000,
+          }
+        )
+        .then(() => {
+
+          console.log(
+            "🍃 MongoDB Connected"
+          );
+
+          return mongoose.connection;
+
+        })
+        .catch((error) => {
+
+          console.error(
+            "❌ MongoDB Connection Error:",
+            error.message
+          );
+
+          // Allow a later invocation to retry cleanly.
+          mongoConnectionPromise = null;
+
+          throw error;
+        });
+  }
+
+  return mongoConnectionPromise;
+};
+
+// Start the connection early, but do not terminate the Vercel
+// process if the first attempt fails. Individual requests can
+// await connectMongo() and receive the real error.
+void connectMongo().catch(() => {});
 
 
 // ==============================
@@ -774,26 +818,54 @@ app.get(
 
 app.get(
   "/api/health",
-  (req, res) => {
+  async (req, res) => {
 
-    res.json({
+    try {
 
-      success:
-        true,
+      await connectMongo();
 
-      server:
-        "online",
+      return res.json({
 
-      mongodb:
-        mongoose.connection
-          .readyState === 1
-          ? "connected"
-          : "disconnected",
+        success:
+          true,
 
-      timestamp:
-        new Date().toISOString(),
+        server:
+          "online",
 
-    });
+        mongodb:
+          "connected",
+
+        timestamp:
+          new Date().toISOString(),
+
+      });
+
+    } catch (error) {
+
+      console.error(
+        "❌ Health MongoDB check failed:",
+        error.message
+      );
+
+      return res.status(503).json({
+
+        success:
+          false,
+
+        server:
+          "online",
+
+        mongodb:
+          "disconnected",
+
+        error:
+          error.message,
+
+        timestamp:
+          new Date().toISOString(),
+
+      });
+    }
   }
 );
 
