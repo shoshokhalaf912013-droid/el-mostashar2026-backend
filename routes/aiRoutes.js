@@ -12,6 +12,10 @@ const crypto = require("crypto");
 // =====================================================
 
 const {
+  CanvasFactory,
+} = require("pdf-parse/worker");
+
+const {
   PDFParse,
 } = require("pdf-parse");
 
@@ -159,6 +163,7 @@ async function extractTextFromUploadedFile(file) {
     const parser =
       new PDFParse({
         data: file.buffer,
+        CanvasFactory,
       });
 
     try {
