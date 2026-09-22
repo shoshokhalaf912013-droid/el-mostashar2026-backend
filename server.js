@@ -26,30 +26,117 @@ const mongoose = require("mongoose");
 
 const admin = require("firebase-admin");
 
-const serviceAccountPath = path.resolve(
-  process.env.SERVICE_ACCOUNT_KEY
-);
+// ------------------------------------------------------------
+// FIREBASE SERVICE ACCOUNT
+// ------------------------------------------------------------
+// Local development:
+//   SERVICE_ACCOUNT_KEY points to the JSON file on the PC.
+//
+// Vercel / production:
+//   FIREBASE_SERVICE_ACCOUNT_JSON contains the full service
+//   account JSON as an environment variable, so no credential
+//   file has to be committed to GitHub.
+// ------------------------------------------------------------
 
-if (!fs.existsSync(serviceAccountPath)) {
+let serviceAccount = null;
+
+if (
+  process.env.FIREBASE_SERVICE_ACCOUNT_JSON
+) {
+
+  try {
+
+    serviceAccount =
+      JSON.parse(
+        process.env.FIREBASE_SERVICE_ACCOUNT_JSON
+      );
+
+    if (
+      serviceAccount &&
+      typeof serviceAccount.private_key ===
+        "string"
+    ) {
+
+      serviceAccount.private_key =
+        serviceAccount.private_key.replace(
+          /\\n/g,
+          "\n"
+        );
+    }
+
+  } catch (error) {
+
+    console.error(
+      "❌ Invalid FIREBASE_SERVICE_ACCOUNT_JSON:",
+      error.message
+    );
+
+    process.exit(1);
+  }
+
+} else if (
+  process.env.SERVICE_ACCOUNT_KEY
+) {
+
+  const serviceAccountPath =
+    path.resolve(
+      process.env.SERVICE_ACCOUNT_KEY
+    );
+
+  if (
+    !fs.existsSync(
+      serviceAccountPath
+    )
+  ) {
+
+    console.error(
+      "❌ Service Account file not found:",
+      serviceAccountPath
+    );
+
+    process.exit(1);
+  }
+
+  try {
+
+    serviceAccount =
+      require(
+        serviceAccountPath
+      );
+
+  } catch (error) {
+
+    console.error(
+      "❌ Could not load Service Account file:",
+      error.message
+    );
+
+    process.exit(1);
+  }
+
+} else {
 
   console.error(
-    "❌ Service Account file not found:",
-    serviceAccountPath
+    "❌ Firebase credentials are not configured. " +
+      "Set FIREBASE_SERVICE_ACCOUNT_JSON " +
+      "or SERVICE_ACCOUNT_KEY."
   );
 
   process.exit(1);
 }
 
-const serviceAccount = require(
-  serviceAccountPath
-);
+if (
+  !admin.apps.length
+) {
 
-admin.initializeApp({
-  credential:
-    admin.credential.cert(
-      serviceAccount
-    ),
-});
+  admin.initializeApp({
+    credential:
+      admin.credential.cert(
+        serviceAccount
+      ),
+  });
+
+}
 
 console.log(
   "🔥 Firebase Admin Connected"
