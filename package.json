@@ -1,0 +1,51 @@
+{
+  "name": "el-mostashar-backend",
+  "version": "1.0.0",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js",
+    "migrate": "knex migrate:latest",
+    "seed": "knex seed:run"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.6",
+    "dotenv": "^16.6.1",
+    "express": "^4.22.1",
+    "express-rate-limit": "^6.7.0",
+    "firebase-admin": "^13.7.0",
+    "helmet": "^6.0.0",
+    "jsonwebtoken": "^9.0.0",
+    "knex": "^2.5.0",
+    "livekit-client": "^2.17.2",
+    "livekit-server-sdk": "^2.15.0",
+    "mammoth": "^1.12.2",
+    "mongoose": "^9.0.1",
+    "morgan": "^1.10.0",
+    "multer": "^1.4.5-lts.1",
+    "openai": "^7.8.0",
+    "pdf-parse": "^2.4.5",
+    "pg": "^8.8.0",
+    "react-router-dom": "^7.13.0",
+    "socket.io": "^4.8.3",
+    "socket.io-client": "^4.8.3",
+    "uuid": "^14.0.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.14"
+  },
+  "description": "Backend: Node + Express + OpenAI routes for el-mostashar2026",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/shoshokhalaf912013-droid/el-mostashar2026-backend.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/shoshokhalaf912013-droid/el-mostashar2026-backend/issues"
+  },
+  "homepage": "https://github.com/shoshokhalaf912013-droid/el-mostashar2026-backend#readme"
+}
