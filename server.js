@@ -233,11 +233,56 @@ const app = express();
 //         MIDDLEWARE
 // ==============================
 
+const allowedCorsOrigins = new Set([
+  "https://el-mostashar2026.web.app",
+  "https://el-mostashar2026.firebaseapp.com",
+  "http://localhost:5173",
+  "http://localhost:5174",
+]);
+
 app.use(
   cors({
-    origin: "*",
+    origin: (origin, callback) => {
+
+      if (!origin || allowedCorsOrigins.has(origin)) {
+        return callback(null, true);
+      }
+
+      return callback(null, false);
+    },
+
+    credentials: true,
+
+    methods: [
+      "GET",
+      "HEAD",
+      "POST",
+      "PUT",
+      "PATCH",
+      "DELETE",
+      "OPTIONS",
+    ],
+
+    allowedHeaders: [
+      "Content-Type",
+      "Authorization",
+      "X-Requested-With",
+      "Accept",
+    ],
   })
 );
+
+app.options("*", cors({
+  origin: (origin, callback) => {
+
+    if (!origin || allowedCorsOrigins.has(origin)) {
+      return callback(null, true);
+    }
+
+    return callback(null, false);
+  },
+  credentials: true,
+}));
 
 app.use(
   express.json({
