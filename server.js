@@ -216,10 +216,9 @@ const connectMongo = async () => {
   return mongoConnectionPromise;
 };
 
-// Start the connection early, but do not terminate the Vercel
-// process if the first attempt fails. Individual requests can
-// await connectMongo() and receive the real error.
-void connectMongo().catch(() => {});
+// MongoDB is a startup dependency for all Mongo-backed routes.
+// The HTTP server must not accept requests until the initial
+// connection has completed successfully.
 
 
 // ==============================
@@ -1409,38 +1408,58 @@ const PORT =
   5000;
 
 
-server.listen(
-  PORT,
-  "0.0.0.0",
-  () => {
+const startServer = async () => {
 
-    console.log(
-      `🚀 Server running on port ${PORT}`
+  try {
+
+    // Do not start accepting HTTP requests until MongoDB is ready.
+    await connectMongo();
+
+    server.listen(
+      PORT,
+      "0.0.0.0",
+      () => {
+
+        console.log(
+          `🚀 Server running on port ${PORT}`
+        );
+
+        console.log(
+          "📡 Socket.IO enabled"
+        );
+
+        console.log(
+          "🎥 LiveKit enabled"
+        );
+
+        console.log(
+          "📝 Exam system enabled"
+        );
+
+        console.log(
+          "📚 Question Bank enabled"
+        );
+
+        console.log(
+          "🔐 Authentication enabled"
+        );
+
+        console.log(
+          "🔒 Protected Video API enabled"
+        );
+
+      }
     );
 
-    console.log(
-      "📡 Socket.IO enabled"
+  } catch (error) {
+
+    console.error(
+      "❌ Server startup aborted because MongoDB is unavailable:",
+      error.message
     );
 
-    console.log(
-      "🎥 LiveKit enabled"
-    );
-
-    console.log(
-      "📝 Exam system enabled"
-    );
-
-    console.log(
-      "📚 Question Bank enabled"
-    );
-
-    console.log(
-      "🔐 Authentication enabled"
-    );
-
-    console.log(
-      "🔒 Protected Video API enabled"
-    );
-
+    process.exit(1);
   }
-);
+};
+
+startServer();
