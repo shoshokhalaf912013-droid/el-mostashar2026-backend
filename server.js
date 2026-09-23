@@ -299,6 +299,23 @@ app.use(
 
 app.use(
   helmet({
+    // The protected video gate is intentionally loaded in an iframe
+    // from the production frontend. Allow that frontend to frame the
+    // backend gate while keeping framing restricted to our own origins.
+    contentSecurityPolicy: {
+      directives: {
+        frameAncestors: [
+          "'self'",
+          "https://el-mostashar2026.web.app",
+          "https://el-mostashar2026.firebaseapp.com",
+        ],
+      },
+    },
+
+    // X-Frame-Options cannot express a cross-origin allowlist.
+    // The CSP frame-ancestors directive above is the modern control.
+    xFrameOptions: false,
+
     crossOriginEmbedderPolicy: false,
   })
 );
