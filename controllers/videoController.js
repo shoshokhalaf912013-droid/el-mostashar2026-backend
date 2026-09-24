@@ -548,7 +548,8 @@ function getFrontendOrigin(
 
 function createYoutubeEmbedUrl(
   req,
-  youtubeVideoId
+  youtubeVideoId,
+  startSeconds = 0
 ) {
 
   // YouTube is embedded inside the backend Gate page.
@@ -586,6 +587,32 @@ function createYoutubeEmbedUrl(
     "iv_load_policy",
     "3"
   );
+
+
+  const normalizedStart =
+    Number.isFinite(
+      Number(startSeconds)
+    )
+      ? Math.max(
+          0,
+          Math.floor(
+            Number(startSeconds)
+          )
+        )
+      : 0;
+
+
+  if (
+    normalizedStart >
+    0
+  ) {
+    params.set(
+      "start",
+      String(
+        normalizedStart
+      )
+    );
+  }
 
 
   if (
@@ -1853,7 +1880,31 @@ async function serveVideoGate(req, res) {
       return res.status(404).send("Video configuration is invalid");
     }
 
-    const ytUrl = createYoutubeEmbedUrl(req, youtubeVideoId);
+    const requestedStart =
+      Number.parseInt(
+        String(
+          req.query.start ||
+          "0"
+        ),
+        10
+      );
+
+
+    const startSeconds =
+      Number.isFinite(
+        requestedStart
+      ) &&
+      requestedStart > 0
+        ? requestedStart
+        : 0;
+
+
+    const ytUrl =
+      createYoutubeEmbedUrl(
+        req,
+        youtubeVideoId,
+        startSeconds
+      );
 
     res.setHeader("Content-Type", "text/html; charset=utf-8");
     res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
