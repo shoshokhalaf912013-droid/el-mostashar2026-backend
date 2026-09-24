@@ -61,9 +61,6 @@ const SESSION_RECREATE_COOLDOWN_MS =
 const rateStore =
   new Map();
 
-const videoSessions =
-  new Map();
-
 
 // =========================================================
 // CLEANUP
@@ -97,26 +94,9 @@ function cleanupStores() {
   }
 
 
-  // -----------------------------------------------
-  // Sessions
-  // -----------------------------------------------
-
-  for (
-    const [
-      sessionId,
-      session,
-    ] of videoSessions.entries()
-  ) {
-
-    if (
-      session.expiresAt <= now
-    ) {
-
-      videoSessions.delete(
-        sessionId
-      );
-    }
-  }
+  // Video sessions are persisted in Firestore.
+  // Expired session documents are removed lazily when accessed.
+  // A Firestore TTL policy can also be configured on expiresAt later.
 }
 
 
@@ -630,7 +610,64 @@ function createYoutubeEmbedUrl(
 // CREATE PLAYBACK SESSION
 // =========================================================
 
-function createVideoSession(
+function getSessionLockId(
+  uid,
+  lessonId
+) {
+
+  return crypto
+    .createHash("sha256")
+    .update(
+      `${String(uid)}:${String(lessonId)}`
+    )
+    .digest("hex");
+}
+
+
+function timestampFromMillis(
+  value
+) {
+
+  return admin.firestore
+    .Timestamp
+    .fromMillis(
+      Number(value)
+    );
+}
+
+
+function timestampToMillis(
+  value
+) {
+
+  if (
+    value &&
+    typeof value.toMillis ===
+      "function"
+  ) {
+
+    return value.toMillis();
+  }
+
+  if (
+    value instanceof Date
+  ) {
+
+    return value.getTime();
+  }
+
+  const numeric =
+    Number(value);
+
+  return Number.isFinite(
+    numeric
+  )
+    ? numeric
+    : 0;
+}
+
+
+async function createVideoSession(
   req,
   lessonId
 ) {
@@ -638,56 +675,19 @@ function createVideoSession(
   const uid =
     req.user.uid;
 
-
   const ip =
     getClientIp(req);
-
 
   const userAgentHash =
     getUserAgentHash(req);
 
-
   const now =
     Date.now();
-
-
-  // -------------------------------------------------------
-  // Find existing sessions for same student + lesson
-  // -------------------------------------------------------
-
-  for (
-    const [
-      oldSessionId,
-      oldSession,
-    ] of videoSessions.entries()
-  ) {
-
-    if (
-      oldSession.uid === uid &&
-      oldSession.lessonId ===
-        lessonId
-    ) {
-
-      // Every new playback request rotates the token.
-      // The previous token becomes invalid immediately.
-      videoSessions.delete(
-        oldSessionId
-      );
-    }
-  }
-
-
-  // -------------------------------------------------------
-  // Create new session
-  // -------------------------------------------------------
 
   const sessionId =
     crypto
       .randomBytes(32)
-      .toString(
-        "base64url"
-      );
-
+      .toString("base64url");
 
   const session = {
 
@@ -713,14 +713,227 @@ function createVideoSession(
 
   };
 
+  const db =
+    getDb();
 
-  videoSessions.set(
-    sessionId,
-    session
+  const sessionRef =
+    db
+      .collection("videoSessions")
+      .doc(sessionId);
+
+  const lockRef =
+    db
+      .collection("videoSessionLocks")
+      .doc(
+        getSessionLockId(
+          uid,
+          lessonId
+        )
+      );
+
+  await db.runTransaction(
+    async (transaction) => {
+
+      const lockSnap =
+        await transaction.get(
+          lockRef
+        );
+
+      if (
+        lockSnap.exists
+      ) {
+
+        const oldSessionId =
+          lockSnap.data()?.sessionId;
+
+        if (
+          oldSessionId &&
+          oldSessionId !==
+            sessionId
+        ) {
+
+          transaction.delete(
+            db
+              .collection(
+                "videoSessions"
+              )
+              .doc(
+                String(
+                  oldSessionId
+                )
+              )
+          );
+        }
+      }
+
+      transaction.set(
+        sessionRef,
+        {
+          ...session,
+          createdAt:
+            timestampFromMillis(
+              session.createdAt
+            ),
+          lastSeenAt:
+            timestampFromMillis(
+              session.lastSeenAt
+            ),
+          expiresAt:
+            timestampFromMillis(
+              session.expiresAt
+            ),
+        }
+      );
+
+      transaction.set(
+        lockRef,
+        {
+          sessionId,
+          uid,
+          lessonId,
+          updatedAt:
+            timestampFromMillis(
+              now
+            ),
+        }
+      );
+    }
   );
 
-
   return session;
+}
+
+
+async function getPersistedVideoSession(
+  sessionId
+) {
+
+  if (
+    !sessionId
+  ) {
+
+    return null;
+  }
+
+  const db =
+    getDb();
+
+  const snap =
+    await db
+      .collection("videoSessions")
+      .doc(sessionId)
+      .get();
+
+  if (
+    !snap.exists
+  ) {
+
+    return null;
+  }
+
+  const data =
+    snap.data() ||
+    {};
+
+  return {
+
+    sessionId:
+      String(
+        data.sessionId ||
+        sessionId
+      ),
+
+    uid:
+      data.uid ||
+      null,
+
+    lessonId:
+      data.lessonId ||
+      null,
+
+    ip:
+      data.ip ||
+      "unknown",
+
+    userAgentHash:
+      data.userAgentHash ||
+      "",
+
+    createdAt:
+      timestampToMillis(
+        data.createdAt
+      ),
+
+    lastSeenAt:
+      timestampToMillis(
+        data.lastSeenAt
+      ),
+
+    expiresAt:
+      timestampToMillis(
+        data.expiresAt
+      ),
+
+  };
+}
+
+
+async function deletePersistedVideoSession(
+  sessionId
+) {
+
+  if (
+    !sessionId
+  ) {
+
+    return;
+  }
+
+  const db =
+    getDb();
+
+  await db
+    .collection("videoSessions")
+    .doc(sessionId)
+    .delete();
+}
+
+
+async function renewPersistedVideoSession(
+  session
+) {
+
+  const now =
+    Date.now();
+
+  const nextExpiresAt =
+    now +
+    VIDEO_SESSION_TTL_MS;
+
+  const db =
+    getDb();
+
+  await db
+    .collection("videoSessions")
+    .doc(
+      session.sessionId
+    )
+    .update({
+      lastSeenAt:
+        timestampFromMillis(
+          now
+        ),
+      expiresAt:
+        timestampFromMillis(
+          nextExpiresAt
+        ),
+    });
+
+  return {
+    ...session,
+    lastSeenAt: now,
+    expiresAt: nextExpiresAt,
+  };
 }
 
 
@@ -728,7 +941,7 @@ function createVideoSession(
 // VALIDATE PLAYBACK SESSION
 // =========================================================
 
-function validateVideoSession(
+async function validateVideoSession(
   req,
   sessionId
 ) {
@@ -748,12 +961,10 @@ function validateVideoSession(
     };
   }
 
-
   const session =
-    videoSessions.get(
+    await getPersistedVideoSession(
       sessionId
     );
-
 
   if (
     !session
@@ -770,20 +981,17 @@ function validateVideoSession(
     };
   }
 
-
   const now =
     Date.now();
-
 
   if (
     session.expiresAt <=
       now
   ) {
 
-    videoSessions.delete(
+    await deletePersistedVideoSession(
       sessionId
     );
-
 
     return {
 
@@ -795,12 +1003,6 @@ function validateVideoSession(
 
     };
   }
-
-  // Authenticated activity renews the same session.
-  session.lastSeenAt = now;
-  session.expiresAt = now + VIDEO_SESSION_TTL_MS;
-  videoSessions.set(sessionId, session);
-
 
   if (
     session.uid !==
@@ -818,12 +1020,11 @@ function validateVideoSession(
     };
   }
 
-
   if (
     session.lessonId !==
     String(
       req.params.lessonId ||
-        ""
+      ""
     )
   ) {
 
@@ -838,7 +1039,6 @@ function validateVideoSession(
     };
   }
 
-
   /*
    * We deliberately do NOT permanently bind playback
    * to an IP because mobile networks can change IPs.
@@ -846,19 +1046,18 @@ function validateVideoSession(
    * User-Agent is much safer as a soft binding signal.
    */
 
-
-  session.lastSeenAt =
-    now;
-
-  // IMPORTANT: this is a hard 2-minute expiry.
-  // Validation must never extend the lifetime of the token.
+  const renewed =
+    await renewPersistedVideoSession(
+      session
+    );
 
   return {
 
     valid:
       true,
 
-    session,
+    session:
+      renewed,
 
   };
 }
@@ -1438,7 +1637,7 @@ async function getVideoAccess(
     // =====================================================
 
     const session =
-      createVideoSession(
+      await createVideoSession(
         req,
         lessonId
       );
@@ -1559,44 +1758,85 @@ async function serveVideoGate(req, res) {
       return res.status(400).send("Invalid video gate");
     }
 
-    const session = videoSessions.get(sessionId);
+    const session =
+      await getPersistedVideoSession(
+        sessionId
+      );
 
-    if (!session || session.lessonId !== lessonId) {
-      return res.status(403).send("Video session is not valid");
+    if (
+      !session ||
+      session.lessonId !==
+        lessonId
+    ) {
+      return res
+        .status(403)
+        .send("Video session is not valid");
     }
 
-    if (session.userAgentHash !== getUserAgentHash(req)) {
-      return res.status(403).send("Video session device mismatch");
+    if (
+      session.userAgentHash !==
+      getUserAgentHash(req)
+    ) {
+      return res
+        .status(403)
+        .send("Video session device mismatch");
     }
 
-    const now = Date.now();
+    const now =
+      Date.now();
 
     // The 2-minute TTL is only an authorization window.
     // The same session is silently renewed while this Gate is open.
-    if (req.query.heartbeat === "1") {
-      if (session.expiresAt <= now) {
-        videoSessions.delete(sessionId);
-        return res.status(403).json({
-          success: false,
-          valid: false,
-          reason: "session_expired",
-        });
+    if (
+      req.query.heartbeat ===
+        "1"
+    ) {
+
+      if (
+        session.expiresAt <=
+        now
+      ) {
+
+        await deletePersistedVideoSession(
+          sessionId
+        );
+
+        return res
+          .status(403)
+          .json({
+            success: false,
+            valid: false,
+            reason: "session_expired",
+          });
       }
 
-      session.lastSeenAt = now;
-      session.expiresAt = now + VIDEO_SESSION_TTL_MS;
-      videoSessions.set(sessionId, session);
+      const renewed =
+        await renewPersistedVideoSession(
+          session
+        );
 
       return res.json({
         success: true,
         valid: true,
-        expiresAt: new Date(session.expiresAt).toISOString(),
+        expiresAt:
+          new Date(
+            renewed.expiresAt
+          ).toISOString(),
       });
     }
 
-    if (session.expiresAt <= now) {
-      videoSessions.delete(sessionId);
-      return res.status(403).send("Video session expired");
+    if (
+      session.expiresAt <=
+      now
+    ) {
+
+      await deletePersistedVideoSession(
+        sessionId
+      );
+
+      return res
+        .status(403)
+        .send("Video session expired");
     }
 
     const db = getDb();
